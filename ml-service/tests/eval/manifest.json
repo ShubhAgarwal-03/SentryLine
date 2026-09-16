@@ -1,0 +1,4 @@
+{
+  "_comment": "Real ground-truth fixtures. Empty until real labeled photos are added — see README.md. Do not add synthetic entries here; those live in synthetic_manifest.json instead.",
+  "entries": []
+}

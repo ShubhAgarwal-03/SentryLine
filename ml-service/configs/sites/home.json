@@ -1,0 +1,7 @@
+{
+  "environment": "home",
+  "restricted_roles": [],
+  "permitted_sharp_object_roles": ["adult", "staff"],
+  "restricted_zones": [],
+  "notes": "Sharp objects near children or left unattended are high risk. Adults handling kitchen items is normal and should not be flagged."
+}

@@ -1,0 +1,88 @@
+# SentryLine hazard class taxonomy — single source of truth.
+#
+# Consumed by:
+#   - app/knowledge/knowledge_graph.py (danger_weight lookups at inference time)
+#   - training/prepare_dataset.py (generates YOLO data.yaml from this file)
+#
+# Adding a new hazard class means editing THIS file only — knowledge_graph.py
+# loads it dynamically, and the training data.yaml generator reads the same
+# list, so scoring and training never fall out of sync.
+#
+# danger_weight: 0.0-1.0, intrinsic danger independent of environment.
+# in_stock_yolo: true if this class already exists in stock YOLOv8's COCO
+#   classes (so it works today without fine-tuning); false means it needs
+#   the fine-tuning pass described in training/README.md before detection
+#   actually works for it.
+
+classes:
+  - label: knife
+    danger_weight: 0.85
+    in_stock_yolo: true
+    notes: COCO class — detects out of the box.
+
+  - label: scissors
+    danger_weight: 0.55
+    in_stock_yolo: true
+    notes: COCO class — detects out of the box.
+
+  - label: gun
+    danger_weight: 0.98
+    in_stock_yolo: false
+    notes: Not a COCO class. Needs fine-tuning data. High priority given danger weight.
+
+  - label: fire
+    danger_weight: 0.95
+    in_stock_yolo: false
+    notes: Not a COCO class (flame/smoke). Needs fine-tuning data.
+
+  - label: spill
+    danger_weight: 0.45
+    in_stock_yolo: false
+    notes: Liquid spill on floor — slip hazard. Not a COCO class, needs fine-tuning data. Visually ambiguous (reflective floor vs. spill) — expect this to need more examples than average.
+
+  - label: ladder
+    danger_weight: 0.35
+    in_stock_yolo: false
+    notes: Not a COCO class. Danger is contextual (unattended/mid-height use), so this class alone won't carry much signal until relationship_engine.py accounts for it — see training/README.md.
+
+  - label: exposed_wire
+    danger_weight: 0.60
+    in_stock_yolo: false
+    notes: Frayed/exposed electrical cable. Not a COCO class. Small object, will need close-up training examples — expect lower initial recall than larger objects.
+
+  - label: broken_glass
+    danger_weight: 0.50
+    in_stock_yolo: false
+    notes: Not a COCO class. Visually similar to normal glass/reflections — flag as a likely source of false positives during early fine-tuning rounds.
+
+  - label: stove_burner_on
+    danger_weight: 0.55
+    in_stock_yolo: false
+    notes: Lit stovetop burner (home environment). Not a COCO class. State-dependent (on vs. off) — this is closer to a fine-grained state classifier than plain object detection; may need a two-stage approach (detect stove, then classify burner state) rather than a single YOLO class.
+
+  - label: bottle
+    danger_weight: 0.10
+    in_stock_yolo: true
+    notes: COCO class — low baseline weight; could contain chemicals, context (site config / near-child relationship) matters more than the object itself.
+
+  - label: cell phone
+    danger_weight: 0.02
+    in_stock_yolo: true
+    notes: COCO class. Included as a low-weight "definitely not a hazard" control class, useful for false-positive-rate testing.
+
+  - label: laptop
+    danger_weight: 0.02
+    in_stock_yolo: true
+    notes: Same purpose as cell phone — control class.
+
+  - label: chair
+    danger_weight: 0.02
+    in_stock_yolo: true
+    notes: Control class.
+
+  - label: person
+    danger_weight: 0.0
+    in_stock_yolo: true
+    notes: Not a hazard object itself — risk comes from relationships to hazard objects, not the person class.
+
+default_danger_weight: 0.15  # applied to any detected object not listed above

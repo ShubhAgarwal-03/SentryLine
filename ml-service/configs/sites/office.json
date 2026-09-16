@@ -1,0 +1,7 @@
+{
+  "environment": "office",
+  "restricted_roles": ["visitor", "employee"],
+  "permitted_sharp_object_roles": [],
+  "restricted_zones": [],
+  "notes": "Sharp objects and running are both atypical here; combined, they should be flagged as high risk regardless of role."
+}

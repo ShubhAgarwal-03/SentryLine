@@ -1,0 +1,7 @@
+{
+  "environment": "hospital",
+  "restricted_roles": ["visitor"],
+  "permitted_sharp_object_roles": ["staff", "nurse"],
+  "restricted_zones": ["operating_room", "medication_storage"],
+  "notes": "Running is discouraged but not flagged as high-risk unless combined with a hazard object and a non-staff role."
+}
