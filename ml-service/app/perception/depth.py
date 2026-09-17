@@ -1,21 +1,43 @@
-"""MiDaS / Depth Anything wrapper — spatial understanding (PRD §4, level 2).
+"""Monocular relative depth estimation via Depth Anything V2 (Small).
 
-Stub for Phase 1: single-image reasoning in v0 doesn't strictly require
-metric depth (relationship_engine.py uses 2D bbox geometry as a cheap proxy
-for "near"/"reachable" in the MVP). This module is wired in once
-reachability needs to account for real distance rather than pixel overlap.
+IMPORTANT SCOPE NOTE: this produces *relative*, uncalibrated depth — "this
+pixel is nearer/farther than that pixel" — not metric distance in meters.
+True metric distance needs camera calibration (focal length, mount height,
+etc.) which doesn't exist yet. What this DOES unlock: catching perspective
+illusions in relationship_engine.py, where two objects overlap in 2D pixel
+space but are actually at very different depths (e.g. a hazard object far
+in the background that only *looks* close to a person in the foreground).
+Real calibrated restricted-zone distance is a separate, later piece of work.
 """
+from functools import lru_cache
+
 import numpy as np
+from PIL import Image
+from transformers import pipeline
+
+MODEL_ID = "depth-anything/Depth-Anything-V2-Small-hf"
 
 
-def estimate_depth(image: np.ndarray) -> np.ndarray:
-    """Returns a per-pixel relative depth map, same H/W as the input image.
+@lru_cache(maxsize=1)
+def _load_pipeline():
+    return pipeline(task="depth-estimation", model=MODEL_ID)
 
-    Not called yet in the Phase 1 pipeline — relationship_engine.py currently
-    uses bounding-box distance only. Swap in a real MiDaS/Depth Anything
-    forward pass here when reachability needs real-world distance.
+
+def estimate_depth(image_rgb: np.ndarray) -> np.ndarray:
+    """Returns a relative depth map, same H/W as the input image.
+
+    Convention: HIGHER value = CLOSER to the camera (matches Depth Anything's
+    default output). Values are relative within a single image only — do not
+    compare depth values across different images/frames.
     """
-    raise NotImplementedError(
-        "Depth estimation not wired into the Phase 1 pipeline yet — "
-        "relationship_engine.py currently uses 2D bbox distance as a proxy."
-    )
+    pil_image = Image.fromarray(image_rgb)
+    result = _load_pipeline()(pil_image)
+    depth = np.array(result["depth"], dtype=np.float32)
+
+    if depth.shape[:2] != image_rgb.shape[:2]:
+        depth_img = Image.fromarray(depth).resize(
+            (image_rgb.shape[1], image_rgb.shape[0]), Image.BILINEAR
+        )
+        depth = np.array(depth_img, dtype=np.float32)
+
+    return depth

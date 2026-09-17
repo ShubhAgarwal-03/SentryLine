@@ -22,6 +22,8 @@ def main():
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--project", default="runs", help="Output directory for training runs")
     parser.add_argument("--name", default="sentryline_hazard_v1", help="Run name")
+    parser.add_argument("--workers", type=int, default=2, help="Dataloader worker processes")
+    parser.add_argument("--amp", action="store_true", help="Enable mixed precision (can cause NaN losses on some GPU/data combos — off by default)")
     args = parser.parse_args()
 
     model = YOLO(args.base_model)
@@ -31,6 +33,8 @@ def main():
         epochs=args.epochs,
         batch=args.batch,
         imgsz=args.imgsz,
+        workers=args.workers,
+        amp=args.amp,
         project=args.project,
         name=args.name,
         # Modest augmentation defaults are fine to start — small validation

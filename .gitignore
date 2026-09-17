@@ -1,0 +1,28 @@
+# --- Python ---
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# --- Model weights (large binaries, re-downloadable) ---
+ml-service/yolov8n.pt
+ml-service/models/*.pt
+ml-service/models/*.onnx
+
+# --- Training runs and outputs (regeneratable, large) ---
+ml-service/runs/
+
+# --- Downloaded/intermediate training datasets (large, sourced externally) ---
+ml-service/training/dataset/
+ml-service/training/data.yaml
+ml-service/*-Detection-*/
+ml-service/*-Detection-*-reorg/
+ml-service/Yolo-Weapon-Detection-*/
+ml-service/Fire-&-Smoke-Detection-*/
+
+# --- Cache/venv/pip ---
+venv/
+pip-cache/
+cache/
+
+# --- Node ---
+node_modules/

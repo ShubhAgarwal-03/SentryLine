@@ -14,7 +14,7 @@ from app.schemas.inference import DetectedObject
 # object set (knife, spill, ladder, etc. — PRD §14) happens once a labeled
 # dataset is assembled; the wrapper interface below doesn't need to change
 # when that swap happens, only the weights path.
-MODEL_PATH = "yolov8n.pt"
+MODEL_PATH = "models/yolov8n.pt"
 
 CONFIDENCE_THRESHOLD = 0.35
 

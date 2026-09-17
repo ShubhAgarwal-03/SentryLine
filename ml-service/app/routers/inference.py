@@ -16,6 +16,7 @@ from app.relationships.relationship_engine import infer_relationship
 from app.reasoning.risk_scorer import compute_risk_score
 from app.reasoning.template_reasoner import generate_explanation
 from app.schemas.inference import InferenceRequest, InferenceResponse
+from app.perception.depth import estimate_depth
 
 router = APIRouter()
 
@@ -52,8 +53,21 @@ def infer(request: InferenceRequest) -> InferenceResponse:
     observed_environment, observed_confidence = classify_environment(image_rgb)
     environment = request.site_config.environment
 
-    # 3. Relationships — spatial reasoning (PRD §4 level 2/3)
-    relationship = infer_relationship(objects)
+        # 3. Relationships — spatial reasoning (PRD §4 level 2/3), now
+    # depth-aware: catches pixel-close objects that are actually far apart
+    # in depth (perspective illusions). See perception/depth.py for the
+    # scope caveat — this is relative depth, not calibrated metric distance.
+    try:
+        depth_map = estimate_depth(image_rgb)
+    except Exception:
+        # Depth estimation is an enhancement, not a hard dependency — if it
+        # fails for any reason, fall back to pixel-only relationships rather
+        # than failing the whole request.
+        import traceback
+        traceback.print_exc()
+        depth_map = None
+
+    relationship = infer_relationship(objects, depth_map=depth_map)
 
     # 4. Risk scoring — environment-conditioned (PRD §12), now
     # context-checked against what the scene actually looks like
