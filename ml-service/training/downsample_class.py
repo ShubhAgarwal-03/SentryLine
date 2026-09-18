@@ -1,99 +1,118 @@
-"""Randomly downsamples a class's images/labels within training/dataset/ to
-a target count, to fix class imbalance between merged datasets (e.g. fire
-massively outnumbering gun after merging).
-
-Only removes images where the SPECIFIED class is the dominant/majority
-content — safer approach: this operates per-split (train/val) and removes
-images at random until the target count for images CONTAINING that class
-is reached. Images with multiple classes are left alone (not removed) to
-avoid accidentally deleting other classes' only examples — so if many
-images are multi-class, true downsampling may not perfectly hit the target;
-the script reports what it actually achieved.
+"""
+downsample_class.py — reduce an overrepresented class to a target count,
+independently per split (train/val), to fix class imbalance between
+merged datasets without breaking the train/val ratio.
 
 Usage:
-    python downsample_class.py --dataset-dir training/dataset --class-name fire --target 1200
+    python training/downsample_class.py --class-name fire --target 900 --val-target 150
 """
-import argparse
-import random
-from pathlib import Path
 
+import argparse
+import os
+import random
 import yaml
 
-HAZARD_CLASSES_PATH = Path(__file__).resolve().parents[1] / "configs" / "hazard_classes.yaml"
+DATASET_DIR = "training/dataset"
+DATA_YAML = "training/data.yaml"
 
 
-def load_target_class_order() -> list[str]:
-    data = yaml.safe_load(HAZARD_CLASSES_PATH.read_text())
-    return [entry["label"] for entry in data["classes"]]
+def load_class_id(class_name):
+    with open(DATA_YAML, "r") as f:
+        cfg = yaml.safe_load(f)
+    names = cfg["names"]
+    if isinstance(names, dict):
+        names = {v: k for k, v in names.items()}  # name -> id
+    else:
+        names = {n: i for i, n in enumerate(names)}
+    if class_name not in names:
+        raise ValueError(f"Class '{class_name}' not found in {DATA_YAML}")
+    return names[class_name]
 
 
-def get_classes_in_label(label_path: Path) -> set[int]:
-    classes = set()
-    for line in label_path.read_text().splitlines():
-        if line.strip():
-            classes.add(int(line.split()[0]))
-    return classes
+def get_single_class_images(label_dir, class_id):
+    """Return label files whose ONLY class present is class_id."""
+    matches = []
+    for fname in os.listdir(label_dir):
+        if not fname.endswith(".txt"):
+            continue
+        path = os.path.join(label_dir, fname)
+        classes_in_file = set()
+        with open(path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                classes_in_file.add(int(line.split()[0]))
+        if classes_in_file == {class_id}:
+            matches.append(fname)
+    return matches
 
 
-def downsample_split(dataset_dir: Path, split: str, target_class_idx: int, target_count: int, seed: int) -> tuple[int, int]:
-    images_dir = dataset_dir / "images" / split
-    labels_dir = dataset_dir / "labels" / split
+def downsample_split(split, class_id, target, dry_run):
+    label_dir = os.path.join(DATASET_DIR, "labels", split)
+    image_dir = os.path.join(DATASET_DIR, "images", split)
 
-    # Find every image whose label file contains ONLY the target class
-    # (single-class images are safe to remove without affecting other classes)
-    only_target = []
-    other = []
-    for label_path in labels_dir.glob("*.txt"):
-        classes = get_classes_in_label(label_path)
-        if classes == {target_class_idx}:
-            only_target.append(label_path)
-        else:
-            other.append(label_path)
+    if not os.path.isdir(label_dir):
+        print(f"[{split}] label dir missing, skipping")
+        return
 
-    current_count = len(only_target)
-    if current_count <= target_count:
-        return current_count, 0  # nothing to remove, already at or below target
+    single_class_files = get_single_class_images(label_dir, class_id)
+    current_count = len(single_class_files)
 
-    random.seed(seed)
-    random.shuffle(only_target)
-    to_remove = only_target[target_count:]
+    print(f"\n[{split}] single-class instances for target class: {current_count}")
 
-    removed = 0
-    for label_path in to_remove:
-        img_stem = label_path.stem
-        label_path.unlink()
+    if current_count <= target:
+        print(f"[{split}] already at or below target ({target}), nothing to remove")
+        return
+
+    n_to_remove = current_count - target
+    random.shuffle(single_class_files)
+    to_remove = single_class_files[:n_to_remove]
+
+    print(f"[{split}] removing {n_to_remove} images to reach target {target}")
+
+    for fname in to_remove:
+        label_path = os.path.join(label_dir, fname)
+        base = os.path.splitext(fname)[0]
+
+        image_path = None
         for ext in (".jpg", ".jpeg", ".png"):
-            img_path = images_dir / f"{img_stem}{ext}"
-            if img_path.exists():
-                img_path.unlink()
-                removed += 1
+            candidate = os.path.join(image_dir, base + ext)
+            if os.path.exists(candidate):
+                image_path = candidate
                 break
 
-    return target_count, removed
+        if dry_run:
+            print(f"  would remove: {fname}" + (f" + {os.path.basename(image_path)}" if image_path else " (image not found)"))
+            continue
+
+        os.remove(label_path)
+        if image_path:
+            os.remove(image_path)
+        else:
+            print(f"  WARNING: no matching image found for {fname}")
+
+    remaining = current_count - (0 if dry_run else n_to_remove)
+    print(f"[{split}] done. remaining single-class count: {remaining}")
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset-dir", required=True)
-    parser.add_argument("--class-name", required=True, help="Class name as it appears in hazard_classes.yaml")
-    parser.add_argument("--target", type=int, required=True, help="Target count of single-class images to keep for this class")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--class-name", required=True)
+    parser.add_argument("--target", type=int, required=True, help="target count for train split")
+    parser.add_argument("--val-target", type=int, default=None,
+                         help="target count for val split (defaults to ~15%% of --target if omitted)")
+    parser.add_argument("--dry-run", action="store_true", help="preview without deleting")
     args = parser.parse_args()
 
-    dataset_dir = Path(args.dataset_dir).resolve()
-    target_classes = load_target_class_order()
+    val_target = args.val_target if args.val_target is not None else max(1, round(args.target * 0.15))
 
-    if args.class_name not in target_classes:
-        print(f"ERROR: '{args.class_name}' not found in hazard_classes.yaml. Valid: {target_classes}")
-        return
-    target_idx = target_classes.index(args.class_name)
+    class_id = load_class_id(args.class_name)
+    print(f"Class '{args.class_name}' = id {class_id}")
+    print(f"Targets — train: {args.target}, val: {val_target}" + (" (auto, 15% of train)" if args.val_target is None else ""))
 
-    print(f"Downsampling class '{args.class_name}' (index {target_idx}) to target {args.target} per split")
-    for split in ("train", "val"):
-        kept, removed = downsample_split(dataset_dir, split, target_idx, args.target, args.seed)
-        print(f"  {split}: kept ~{kept} single-class images, removed {removed} image files")
-
-    print("\nDone. Re-run prepare_dataset.py if you want a fresh data.yaml (class list unchanged, just noting the data changed).")
+    downsample_split("train", class_id, args.target, args.dry_run)
+    downsample_split("val", class_id, val_target, args.dry_run)
 
 
 if __name__ == "__main__":
