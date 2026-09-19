@@ -42,9 +42,28 @@ def load_target_class_order() -> list[str]:
     return [entry["label"] for entry in data["classes"]]
 
 
-def remap_label_file(src_path: Path, dst_path: Path, index_map: dict[int, int]) -> None:
+def _to_yolo_bbox(parts: list[str]) -> str | None:
+    """Return "x y w h" for a label line's coordinates. Passes plain boxes
+    through; converts polygon (segmentation) lines to their bounding box.
+    Returns None for malformed lines. Mixed polygon/box datasets make
+    Ultralytics warn and silently drop the polygons — normalising here
+    avoids that."""
+    coords = parts[1:]
+    if len(coords) == 4:
+        return " ".join(coords)
+    if len(coords) >= 6 and len(coords) % 2 == 0:
+        xs = [float(v) for v in coords[0::2]]
+        ys = [float(v) for v in coords[1::2]]
+        x1, x2, y1, y2 = min(xs), max(xs), min(ys), max(ys)
+        return f"{(x1 + x2) / 2:.6f} {(y1 + y2) / 2:.6f} {x2 - x1:.6f} {y2 - y1:.6f}"
+    return None
+
+
+def remap_label_lines(src_path: Path, index_map: dict[int, int]) -> list[str]:
     """index_map: source class index -> target class index. Source indices
-    not in the map are dropped (SKIP classes)."""
+    not in the map are dropped (SKIP classes). Returns the surviving lines
+    WITHOUT writing anything, so the caller can decide the output filename
+    first."""
     lines_out = []
     for line in src_path.read_text().splitlines():
         if not line.strip():
@@ -53,11 +72,12 @@ def remap_label_file(src_path: Path, dst_path: Path, index_map: dict[int, int]) 
         src_idx = int(parts[0])
         if src_idx not in index_map:
             continue  # SKIP class — drop this object
-        target_idx = index_map[src_idx]
-        lines_out.append(f"{target_idx} {' '.join(parts[1:])}")
-
-    if lines_out:  # only write if at least one object survived
-        dst_path.write_text("\n".join(lines_out) + "\n")
+        box = _to_yolo_bbox(parts)
+        if box is None:
+            print(f"  WARNING: malformed label line in {src_path.name}, skipped")
+            continue
+        lines_out.append(f"{index_map[src_idx]} {box}")
+    return lines_out
 
 
 def merge_split(source_dir: Path, dest_dir: Path, split: str, index_map: dict[int, int]) -> int:
@@ -79,19 +99,23 @@ def merge_split(source_dir: Path, dest_dir: Path, split: str, index_map: dict[in
         if not label_path.exists():
             continue  # no annotations for this image, skip
 
-        # Remap into a temp buffer first so we don't copy images whose
-        # labels end up empty after SKIP filtering
-        tmp_label_dst = dst_labels / label_path.name
-        remap_label_file(label_path, tmp_label_dst, index_map)
+        lines = remap_label_lines(label_path, index_map)
+        if not lines:
+            continue  # every object was SKIPped — don't import the image
 
-        if tmp_label_dst.exists():
-            dst_img_path = dst_images / img_path.name
-            if dst_img_path.exists():
-                # Name collision across merged datasets — prefix with source dir name
-                dst_img_path = dst_images / f"{source_dir.name}_{img_path.name}"
-                tmp_label_dst.rename(dst_labels / f"{source_dir.name}_{label_path.name}")
-            shutil.copy2(img_path, dst_img_path)
-            copied += 1
+        # Decide the final name BEFORE writing anything. Collision if EITHER
+        # the image or its label already exists in dest (from an earlier
+        # merged dataset); prefix with the source folder name until unique.
+        # (The old version wrote the label first, which overwrote the
+        # earlier dataset's label on a name clash.)
+        stem, suffix = img_path.stem, img_path.suffix
+        prefix = source_dir.name
+        while (dst_images / f"{stem}{suffix}").exists() or (dst_labels / f"{stem}.txt").exists():
+            stem = f"{prefix}_{stem}"
+
+        shutil.copy2(img_path, dst_images / f"{stem}{suffix}")
+        (dst_labels / f"{stem}.txt").write_text("\n".join(lines) + "\n")
+        copied += 1
 
     return copied
 

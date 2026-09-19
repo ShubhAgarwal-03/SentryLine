@@ -9,6 +9,7 @@ Usage:
 Run prepare_dataset.py first to generate data.yaml.
 """
 import argparse
+from pathlib import Path
 
 from ultralytics import YOLO
 
@@ -16,13 +17,14 @@ from ultralytics import YOLO
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", required=True, help="Path to data.yaml from prepare_dataset.py")
-    parser.add_argument("--base-model", default="yolov8n.pt", help="Starting checkpoint (must match app/perception/detector.py's MODEL_PATH if you intend to deploy the result)")
+    parser.add_argument("--base-model", default="yolov8n.pt", help="Starting checkpoint for fine-tuning (the stock COCO model)")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--project", default="runs", help="Output directory for training runs")
     parser.add_argument("--name", default="sentryline_hazard_v1", help="Run name")
     parser.add_argument("--workers", type=int, default=2, help="Dataloader worker processes")
+    parser.add_argument("--patience", type=int, default=30, help="Stop early after this many epochs with no val improvement (Ultralytics default is 100, i.e. never for a 100-epoch run)")
     parser.add_argument("--amp", action="store_true", help="Enable mixed precision (can cause NaN losses on some GPU/data combos — off by default)")
     args = parser.parse_args()
 
@@ -34,6 +36,7 @@ def main():
         batch=args.batch,
         imgsz=args.imgsz,
         workers=args.workers,
+        patience=args.patience,
         amp=args.amp,
         project=args.project,
         name=args.name,
@@ -42,13 +45,16 @@ def main():
         # revisit once there's enough data to tell signal from noise.
     )
 
-    print(f"\nTraining complete. Best weights: {args.project}/{args.name}/weights/best.pt")
+    # Ultralytics auto-increments the run folder (name -> name2, name3, ...)
+    # when exist_ok=False, so args.name is NOT the real path. Ask the trainer.
+    best = Path(model.trainer.save_dir) / "weights" / "best.pt"
+    print(f"\nTraining complete. Best weights: {best}")
     print(
-        "To deploy: copy best.pt to apps/ml-service/models/ and update "
-        "MODEL_PATH in app/perception/detector.py to point at it. Then run "
-        "the eval harness (tests/eval/eval_detection.py) against real "
-        "fixtures to confirm mAP actually improved before replacing the "
-        "production checkpoint."
+        f"To deploy: copy {best} to ml-service/models/gun_fire_v1.pt (or set "
+        "SENTRYLINE_HAZARD_MODEL). app/perception/detector.py runs this alongside "
+        "the stock yolov8n.pt — do NOT replace yolov8n.pt with it, or person/knife/"
+        "etc. stop being detected. Then run tests/eval/eval_detection.py against "
+        "real fixtures to confirm mAP actually improved."
     )
 
 
